@@ -1,0 +1,381 @@
+unit ExperementDataU;
+
+interface
+
+uses SysUtils;
+
+type
+  TExperementData = class //(TObject)
+  private
+  public
+    // назва файлу експеременту
+    FileName: string;
+    //шлях до файлу експеременту
+    FilePath: string;
+    // кількість виборок прочитаних з файлу
+    SamplesCount: Integer;
+    // довжина виборки
+    SampleLength: Integer;
+    // масив виборок
+    Samples: array of array of Double;
+    // magneticFieldStrength
+    magneticFieldStrength: Double;
+    // sampleFrequency
+    sampleFrequency: Integer;
+    amplification1: Integer;
+    amplification2: Integer;
+    discrimination: Integer;
+
+    // початкова точка пошуку значень
+    StartPoint: Integer;
+    // кінцева точка пошуку значень
+    EndPoint: Integer;
+    // порогове значення
+    Threshold: Integer;
+
+    // масиви по виборках
+    //****************************************
+
+    // максимальна амплітуда
+    AMax,
+    // сума амплітуд і підсумковий рахунок
+    ASum, NSum,
+    // сума квадратів амплітуд поділена на підсумковий рахунок
+    ASumDivNSum: array of Double;
+
+    // середні значення
+    //****************************************
+
+    // максимальна амплітуда
+    AMaxMeanValue,
+    // сума амплітуд
+    ASumMeanValue,
+    // підсумковий рахунок
+    NSumMeanValue,
+    // сума квадратів амплітуд поділена на підсумковий рахунок
+    ASumDivNSumMeanValue: Double;
+
+    // середні квадратичні відхилення
+    //****************************************
+    // максимальна амплітуда
+    AMaxRMS,
+    // сума амплітуд
+    ASumRMS,
+    // підсумковий рахунок
+    NSumRMS,
+    // сума квадратів амплітуд поділена на підсумковий рахунок
+    ASumDivNSumRMS: Double;
+
+    // масив міток (0 - виборка істинна, 1 - виборка хибна)
+    TrueValues: array of Byte;
+    // число істинних виборок
+    k: Integer;
+
+    //************************************************************
+    // занялення середнього для кожної вибірки
+    procedure updateToZeroLine();
+    // знаходження макс амплітуд, підсумкового рахунку, суми амплітуд тощо
+    procedure PrepareData(StartPoint: Integer; EndPoint: Integer; Threshold: Integer);
+    // обчислення усереднених значень
+    procedure CalcAverage;
+    // обчислення середнього квадратичного відхилення
+    procedure CalcRMSDeviation;
+    // конструктор
+    constructor Create;
+    // деструктор
+    destructor Destroy; override;
+    // зчитування з файлу
+    procedure LoadFromFile(FileName: string); // terminated format
+    procedure LoadFromNewFile(FileName: string); //new format
+
+  end;
+
+implementation
+
+constructor TExperementData.Create;
+begin
+  inherited;
+end;
+
+destructor TExperementData.Destroy;
+begin
+  Samples := nil;
+  AMax := nil;
+  ASum := nil;
+  NSum := nil;
+  ASumDivNSum := nil;
+  TrueValues := nil;
+end;
+
+procedure TExperementData.updateToZeroLine();
+var
+        i, j: Integer; avrage: Double;
+begin
+        for i := 0 to SamplesCount - 1 do begin
+                // find average
+                avrage := 0;
+                for j := 0 to SampleLength - 1 do begin
+                        avrage := avrage + Samples[i][j];
+                end;
+                avrage := avrage / SampleLength;
+                // set new zero line
+                for j := 0 to SampleLength - 1 do begin
+                        Samples[i,j] := Samples[i,j] - avrage;
+                end;
+        end;
+end;
+
+// знаходження макс амплітуд, підсумкового рахунку, суми амплітуд тощо
+//procedure TExperementData.PrepareData(speSampleNoValue: integer; StartPoint: Integer; EndPoint: Integer; Threshold: Integer);
+
+procedure TExperementData.PrepareData(StartPoint: Integer; EndPoint: Integer; Threshold: Integer);
+var
+  i, j: Integer;
+  Res1, Res2, Res4: Double; // додаткові змінні  \
+  Res3 : Integer;
+
+begin
+
+  Self.StartPoint := StartPoint;
+  Self.EndPoint := EndPoint;
+  Self.Threshold := Threshold;
+
+  // перевірка чи в першій виборці є амплітуди, що перевищують порогове значення
+  //j := 0;
+  //for i:=0 to High(Samples[speSampleNoValue-1]) do begin
+  //  if (Samples[speSampleNoValue-1,i] >= Threshold) then j := 1;
+  //  Break;
+  //end;
+
+  SetLength(AMax, SamplesCount);
+  SetLength(ASum, SamplesCount);
+  SetLength(NSum, SamplesCount);
+  SetLength(ASumDivNSum, SamplesCount);
+
+  SetLength(TrueValues, SamplesCount);
+
+
+  for i := 0 to High(Samples) do begin
+
+    Res1 := 0; // максимальна амплітуда
+    Res2 := 0; // сума амплітуд
+    Res3 := 0; // підсумковий рахунок
+    Res4 := 0; // сума квадратів амплітуд / підсумковий рахунок
+
+    // додаткова перевірка
+    if (EndPoint < High(Samples[i])) then
+
+      for j := StartPoint to EndPoint - 2 do begin
+
+        // пошук максимальної амплітуди
+        if (Samples[i, j] > Res1) then Res1 := Samples[i, j];
+
+        // пошук інших величин
+        if (Samples[i, j] >= Samples[i, j - 1]) and
+          (Samples[i, j] > Samples[i, j + 1]) and
+          (Samples[i, j] >= Threshold)
+          then begin
+
+          Res2 := Res2 + Samples[i, j]; // збільшення суми амплітуд
+          Inc(Res3); // збільшення підсумкового рахунку
+          Res4 := Res4 + Sqr(Samples[i, j]); // збільшення суми квадратів амплітуд
+
+        end;
+
+      end; { for j }
+
+    // позначення, що виборка істинна
+    TrueValues[i] := 0;
+    // запис знайдених значень в загальні масиви
+    AMax[i] := Res1;
+    ASum[i] := Res2;
+    NSum[i] := Res3;
+    ASumDivNSum[i] := Round(Res4 / SamplesCount);
+
+  end; { for i }
+
+end;
+
+
+// знаходження усереднених значень
+
+procedure TExperementData.CalcAverage;
+var
+  i: Integer;
+begin
+  AMaxMeanValue := 0;
+  ASumMeanValue := 0;
+  NSumMeanValue := 0;
+  ASumDivNSumMeanValue := 0;
+
+  for i := 0 to SamplesCount - 1 do
+
+    // якщо виборка істинна, то приймаємо її значення в обчислення
+    if (TrueValues[i] = 0) then begin
+      AMaxMeanValue := AMaxMeanValue + AMax[i];
+      ASumMeanValue := ASumMeanValue + ASum[i];
+      NSumMeanValue := NSumMeanValue + NSum[i];
+      ASumDivNSumMeanValue := ASumDivNSumMeanValue + ASumDivNSum[i];
+    end;
+
+  AMaxMeanValue := Round(AMaxMeanValue / SamplesCount);
+  ASumMeanValue := Round(ASumMeanValue / SamplesCount);
+  NSumMeanValue := Round(NSumMeanValue / SamplesCount);
+  ASumDivNSumMeanValue := Round(ASumDivNSumMeanValue / SamplesCount);
+end;
+
+
+// середнє квадратичне відхилення
+
+procedure TExperementData.CalcRMSDeviation;
+var
+  i: Integer;
+begin
+  AMaxRMS := 0;
+  ASumRMS := 0;
+  NSumRMS := 0;
+  ASumDivNSumRMS := 0;
+
+  for i := 0 to SamplesCount - 1 do
+    // якщо виборка істинна, то приймаємо її значення в обчислення
+    if (TrueValues[i] = 0) then begin
+      AMaxRMS := AMaxRMS + Sqr(AMax[i] - AMaxMeanValue);
+      ASumRMS := ASumRMS + Sqr(ASum[i] - ASumMeanValue);
+      NSumRMS := NSumRMS + Sqr(NSum[i] - NSumMeanValue);
+      ASumDivNSumRMS := ASumDivNSumRMS + Sqr(ASumDivNSum[i] - ASumDivNSumMeanValue);
+    end;
+
+  AMaxRMS := Sqrt(AMaxRMS / (SamplesCount - 1));
+  ASumRMS := Sqrt(ASumRMS / (SamplesCount - 1));
+  NSumRMS := Sqrt(NSumRMS / (SamplesCount - 1));
+  ASumDivNSumRMS := Sqrt(ASumDivNSumRMS / (SamplesCount - 1));
+end;
+
+procedure TExperementData.LoadFromFile(FileName: string);
+var
+  F: TextFile;
+  Index: Word;
+  TmpStr: string;
+  TmpInt: Integer;
+  i, j: Integer;
+  // тимачсовий масив, в який зчитується поточна виборка
+  TempAr: array[0..100000] of Integer;
+
+begin
+  try
+    self.FilePath := FileName;
+    self.FileName := ExtractFileName(FileName);
+    AssignFile(f, FileName);
+    Reset(F);
+      // читання кількості виборок
+    ReadLn(F, SamplesCount);
+    ReadLn(F);
+      // задання довжини масиву виборок
+    SetLength(Samples, SamplesCount);
+
+    for i := 0 to SamplesCount - 1 do begin
+      for j := 0 to High(TempAr) do begin
+        ReadLn(F, TmpStr);
+
+          // якщо прочитана стрічка непуста пробуємо її конвертувати в число
+        if (Length(TmpStr) > 0) then begin
+
+          try
+            TmpInt := StrToInt(TmpStr);
+          except
+
+            raise Exception.Create('Помилка читання даних з файлу. Коректне відображення даних неможливе.');
+            CloseFile(F);
+            Exit;
+          end;
+
+            // запис числа в тимчасовий масив
+          TempAr[j] := TmpInt;
+
+        end
+
+          // якщо прочитана стрічка пуста, то читання поточної виборки завершено - виходимо з внутр. циклу
+        else begin
+          Index := j - 1;
+          ReadLn(F);
+          ReadLn(F);
+          ReadLn(F);
+          ReadLn(F);
+          Break;
+        end;
+
+      end;
+
+        // виділяємо пам'ять на елемент поточної виборки в масиві
+      SetLength(Samples[i], Index + 1);
+
+        // переносимо поточну виборку в масив
+      for j := 0 to Index do begin
+        Samples[i, j] := TempAr[j];
+      end;
+
+      SampleLength := Index + 1;
+
+    end;
+
+    CloseFile(F);
+  except
+    raise Exception.Create('Помилка читання даних з файлу. Коректне відображення даних неможливе.');
+    CloseFile(F);
+    Exit;
+  end;
+
+end;
+
+//////////////////////////////////////////////
+
+procedure TExperementData.LoadFromNewFile(FileName: string);
+var
+  F: TextFile;
+  i, j: Integer;
+begin
+
+
+
+  try
+
+
+
+    if (FileExists(FileName)) then
+    begin
+      self.FilePath := FileName;
+      self.FileName := ExtractFileName(FileName);
+      AssignFile(f, FileName);
+      Reset(F);
+
+      ReadLn(F, SamplesCount);
+      ReadLn(F, magneticFieldStrength);
+      ReadLn(F, sampleFrequency);
+      ReadLn(F, amplification1);
+      ReadLn(F, amplification2);
+      ReadLn(F, discrimination);
+      ReadLn(F);
+
+      SetLength(Samples, SamplesCount);
+      for j := 0 to SamplesCount - 1 do
+      begin
+        ReadLn(F, SampleLength);
+        SetLength(Samples[j], SampleLength);
+        for i := 0 to SampleLength - 1 do
+        begin
+          ReadLn(F, Samples[j][i]);
+        end;
+        ReadLn(F);
+      end;
+      CloseFile(f);
+
+    end
+  except
+    raise Exception.Create('Помилка читання даних з файлу. Коректне відображення даних неможливе.');
+    CloseFile(F);
+    Exit;
+  end;
+
+end;
+
+end.
